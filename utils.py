@@ -223,6 +223,8 @@ def create_frame(
     x, y, yaw, v = unpack_state(state)
     steer, accel = unpack_control(control)
 
+    frame: list[Artist | Line2D | Polygon] = []
+
     #
     # Draw the vehicle
     #
@@ -230,7 +232,7 @@ def create_frame(
     xs = np.array([-0.5, -0.5, 0.5, 0.5, -0.5]) * vehicle_length
     ys = np.array([-0.5, 0.5, 0.5, -0.5, -0.5]) * vehicle_width
     xs, ys = affine_transform(xs, ys, angle=yaw)
-    frame = ax_main.plot(xs, ys, color="black", linewidth=2.0, zorder=3)
+    frame += ax_main.plot(xs, ys, color="black", linewidth=2.0, zorder=3)
 
     # Center of the vehicle
     r = vehicle_width / 20.0
@@ -275,27 +277,25 @@ def create_frame(
     #
 
     # TODO: consider pose information
-    text = f"Speed = {v:>+3.1f} [m/s]"
-    frame += [
-        ax_main.text(
-            0.5,
-            0.02,
-            text,
-            ha="center",
-            transform=ax_main.transAxes,
-            fontsize=14,
-            fontfamily="monospace",
-        )
-    ]
+    text = ax_main.text(
+        x=0.5,
+        y=0.02,
+        s=f"Speed = {v:>+3.1f} [m/s]",
+        ha="center",
+        transform=ax_main.transAxes,
+        fontsize=14,
+        fontfamily="monospace",
+    )
+    frame += [text]
 
     #
     # Minimap
     #
 
+    frame += ax_mini.plot(reference["x"], reference["y"], color="black", linestyle="dashed")
+
     xs = np.array([-0.5, -0.5, 0.5, 0.5, -0.5]) * vehicle_length
     ys = np.array([-0.5, 0.5, 0.5, -0.5, -0.5]) * vehicle_width
-
-    frame += ax_mini.plot(reference["x"], reference["y"], color="black", linestyle="dashed")
     xs, ys = affine_transform(xs, ys, yaw, x=x, y=y)
     frame += ax_mini.plot(xs, ys, color="black", linewidth=2.0, zorder=3)
     frame += ax_mini.fill(xs, ys, color="white", zorder=2)
@@ -304,20 +304,21 @@ def create_frame(
     # Steering display
     #
 
-    wedge_max = 3.0 / 4.0
-    wedge_start = 225
     s_abs = np.abs(steer)
-
     left_adjust = 0.0 if steer < 0.0 else -s_abs
     right_adjust = -s_abs if steer < 0.0 else 0.0
 
+    wedge_extent = 3.0 / 4.0
+    wedge_start = 225
+
     wedges = [
-        (max_steer + left_adjust) * wedge_max,
-        s_abs * wedge_max,
-        (max_steer + right_adjust) * wedge_max,
-        2 * max_steer * (1 - wedge_max),
+        (max_steer + left_adjust) * wedge_extent,
+        s_abs * wedge_extent,
+        (max_steer + right_adjust) * wedge_extent,
+        2 * max_steer * (1 - wedge_extent),
     ]
 
+    # TODO: change the color when at limit
     steer_pie_obj, _ = ax_steer.pie(  # type: ignore
         wedges,
         startangle=wedge_start,
@@ -327,17 +328,51 @@ def create_frame(
     )
     frame += steer_pie_obj
 
-    frame += [
-        ax_steer.text(
-            0,
-            -1,
-            f"{np.rad2deg(steer):+.2f} [deg]",
-            size=14,
-            horizontalalignment="center",
-            verticalalignment="center",
-            fontfamily="monospace",
-        )
+    text = ax_steer.text(
+        x=0,
+        y=-1,
+        s=f"{np.rad2deg(steer):+.2f} [deg]",
+        size=14,
+        horizontalalignment="center",
+        verticalalignment="center",
+        fontfamily="monospace",
+    )
+    frame += [text]
+
+    #
+    # Acceleration display
+    #
+
+    s_abs = np.abs(accel)
+    left_adjust = 0.0 if accel < 0.0 else -s_abs
+    right_adjust = -s_abs if accel < 0.0 else 0.0
+
+    wedges = [
+        (max_steer + left_adjust) * wedge_extent,
+        s_abs * wedge_extent,
+        (max_steer + right_adjust) * wedge_extent,
+        2 * max_steer * (1 - wedge_extent),
     ]
+
+    accel_pie_obj, _ = ax_accel.pie(  # type: ignore
+        wedges,
+        startangle=wedge_start,
+        counterclock=False,
+        colors=["lightgray", "black", "lightgray", "white"],
+        wedgeprops={"linewidth": 0, "edgecolor": "white", "width": 0.4},
+    )
+    frame += accel_pie_obj
+
+    text = ax_accel.text(
+        x=0,
+        y=-1,
+        s=f"{accel:+.2f} " + r"$ \rm{[m/s^2]}$",
+        size=14,
+        horizontalalignment="center",
+        verticalalignment="center",
+        fontfamily="monospace",
+    )
+    frame += [text]
 
     #
     # Trajectory samples
@@ -381,60 +416,17 @@ def create_frame(
     #             alpha=alpha_value,
     #         )
 
-    # # acceleration
-    # pie_rate = 3.0 / 4.0
-    # pie_start = 225
-    # a_abs = np.abs(accel)
-    # if accel > 0.0:
-    #     accel_pie_obj, _ = ax_accel.pie(  # type: ignore
-    #         [
-    #             max_accel * pie_rate,
-    #             a_abs * pie_rate,
-    #             (max_accel - a_abs) * pie_rate,
-    #             2 * max_accel * (1 - pie_rate),
-    #         ],
-    #         startangle=pie_start,
-    #         counterclock=False,
-    #         colors=["lightgray", "black", "lightgray", "white"],
-    #         wedgeprops={"linewidth": 0, "edgecolor": "white", "width": 0.4},
-    #     )
-    # else:
-    #     accel_pie_obj, _ = ax_accel.pie(  # type: ignore
-    #         [
-    #             (max_accel - a_abs) * pie_rate,
-    #             a_abs * pie_rate,
-    #             max_accel * pie_rate,
-    #             2 * max_accel * (1 - pie_rate),
-    #         ],
-    #         startangle=pie_start,
-    #         counterclock=False,
-    #         colors=["lightgray", "black", "lightgray", "white"],
-    #         wedgeprops={"linewidth": 0, "edgecolor": "white", "width": 0.4},
-    #     )
-    # frame += accel_pie_obj
-    # frame += [
-    #     ax_accel.text(
-    #         0,
-    #         -1,
-    #         f"{accel:+.2f} " + r"$ \rm{[m/s^2]}$",
-    #         size=14,
-    #         horizontalalignment="center",
-    #         verticalalignment="center",
-    #         fontfamily="monospace",
-    #     )
-    # ]
-
     return frame
 
 
 def affine_transform(
-    xlist: list[float] | FloatArray,
-    ylist: list[float] | FloatArray,
+    xs: list[float] | FloatArray,
+    ys: list[float] | FloatArray,
     angle: float = 0.0,
     x: float = 0.0,
     y: float = 0.0,
 ) -> tuple[list[float], list[float]]:
     cos_angle, sin_angle = np.cos(angle), np.sin(angle)
-    x_xform = [xval * cos_angle - yval * sin_angle + x for xval, yval in zip(xlist, ylist)]
-    y_xform = [xval * sin_angle + yval * cos_angle + y for xval, yval in zip(xlist, ylist)]
+    x_xform = [xval * cos_angle - yval * sin_angle + x for xval, yval in zip(xs, ys)]
+    y_xform = [xval * sin_angle + yval * cos_angle + y for xval, yval in zip(xs, ys)]
     return x_xform, y_xform
