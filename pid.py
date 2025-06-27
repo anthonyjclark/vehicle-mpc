@@ -6,19 +6,40 @@ from vehicle import Control, State
 
 
 class PidController:
-    def __init__(self, Kp: float, Ki: float, Kd: float, dt: float):
+    def __init__(self, Kp: float, Ki: float, Kd: float, limits: Pair, dt: float):
         self.Kp = Kp
         self.Ki = Ki
         self.Kd = Kd
-        self.dt = dt
-        self.prev_error = 0.0
-        self.integral = 0.0
 
-    def control(self, error: float) -> float:
-        self.integral += error * self.dt
-        derivative = (error - self.prev_error) / self.dt
-        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
-        self.prev_error = error
+        self.limits = limits
+        self.dt = dt
+
+        self.integral = 0
+        self.derivative = 0
+
+        self.prev_value = 0
+
+    def __call__(self, target: float, value: float) -> float:
+        min_output, max_output = self.limits
+
+        error = target - value
+
+        proportional = self.Kp * error
+
+        integral = self.integral + self.Ki * error * self.dt
+
+        # Calculate derivative on the measured value instead of the error
+        dv = value - self.prev_value
+        self.prev_value = value
+        self.derivative = -self.Kd * (dv / self.dt)
+
+        output = proportional + integral + self.derivative
+
+        # Only accumulate integral if output is not saturated or error would reduce saturation
+        if not ((output >= max_output and error > 0) or (output <= min_output and error < 0)):
+            self.integral = integral
+
+        output = np.clip(output, min_output, max_output)
         return output
 
 
@@ -30,17 +51,22 @@ class PidPathFollower:
         Kp_steer: float = 1.0,
         Ki_steer: float = 0.0,
         Kd_steer: float = 0.0,
+        max_steer: float = 0.523,
         Kp_accel: float = 1.0,
         Ki_accel: float = 0.0,
         Kd_accel: float = 0.0,
+        max_accel: float = 2.0,
     ):
         self.ref_xs: FloatArray = reference["x"].to_numpy(dtype=float)  # type: ignore
         self.ref_ys: FloatArray = reference["y"].to_numpy(dtype=float)  # type: ignore
         self.ref_yaws: FloatArray = reference["yaw"].to_numpy(dtype=float)  # type: ignore
         self.ref_vs: FloatArray = reference["v"].to_numpy(dtype=float)  # type: ignore
 
-        self.pid_steer = PidController(Kp_steer, Ki_steer, Kd_steer, dt)
-        self.pid_accel = PidController(Kp_accel, Ki_accel, Kd_accel, dt)
+        steer_limits = (-max_steer, max_steer)
+        accel_limits = (-max_accel, max_accel)
+
+        self.pid_steer = PidController(Kp_steer, Ki_steer, Kd_steer, steer_limits, dt)
+        self.pid_accel = PidController(Kp_accel, Ki_accel, Kd_accel, accel_limits, dt)
 
     def __call__(self, state: State) -> Control:
         x, y, yaw, v = state["x"], state["y"], state["yaw"], state["v"]
