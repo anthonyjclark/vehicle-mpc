@@ -30,13 +30,13 @@ class Vehicle:
         self,
         init_state: State | None = None,
         wheel_base: float = 2.5,  # [m]
-        max_steer_abs: float = 0.523,  # [rad]
-        max_accel_abs: float = 2.000,  # [m/s^2]
+        max_steer: float = 0.523,  # [rad]
+        max_accel: float = 2.000,  # [m/s^2]
         dt: float = 0.05,  # [s]
     ):
         self.wheel_base = wheel_base
-        self.max_steer_abs = max_steer_abs
-        self.max_accel_abs = max_accel_abs
+        self.max_steer = max_steer
+        self.max_accel = max_accel
         self.dt = dt
 
         self.reset(init_state)
@@ -50,10 +50,16 @@ class Vehicle:
 
     def update(self, u: Control) -> State:
         x, y, yaw, v = unpack_state(self.state)
+        steer, accel = unpack_control(u)
 
-        steer = np.clip(u["steer"], -self.max_steer_abs, self.max_steer_abs)
-        accel = np.clip(u["accel"], -self.max_accel_abs, self.max_accel_abs)
+        if abs(steer) > self.max_steer:
+            raise ValueError(f"Steering angle {steer} exceeds max limit {self.max_steer}.")
 
+        if abs(accel) > self.max_accel:
+            raise ValueError(f"Acceleration {accel} exceeds max limit {self.max_accel}.")
+
+        # TODO: normalize the angle
+        # TODO: consider adding "drag"
         self.state: State = {
             "x": x + v * np.cos(yaw) * self.dt,
             "y": y + v * np.sin(yaw) * self.dt,
