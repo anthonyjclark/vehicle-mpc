@@ -36,7 +36,7 @@ def circular_trajectory(
 
 
 def stadium_trajectory(
-    count: int = 200, radius: float = 20.0, length: float = 50.0, speed: float = 1.0
+    count: int = 200, radius: float = 20.0, length: float = 20.0, speed: float = 1.0
 ) -> DataFrame:
     straight_length = length * 2
     curve_length = 2 * np.pi * radius
@@ -88,7 +88,7 @@ def to_jshtml(
 
 
 def save_animation(
-    reference: DataFrame,
+    ref_traj: DataFrame,
     states: DataFrame,
     controls: DataFrame,
     max_steer: float,
@@ -98,7 +98,7 @@ def save_animation(
     movie_writer: str = "ffmpeg",
 ) -> None:
     animation, _ = create_animation(
-        reference,
+        ref_traj,
         states,
         controls,
         max_steer,
@@ -109,12 +109,13 @@ def save_animation(
 
 
 def show_animation(
-    reference: DataFrame,
+    ref_traj: DataFrame,
     states: DataFrame,
     controls: DataFrame,
     max_steer: float,
     max_accel: float,
     interval_ms: int,
+    max_frames: int = 200,
 ) -> None:
     def progress_callback(current: int, total: int) -> None:
         to_jshtml_pbar.n = current + 1
@@ -122,10 +123,13 @@ def show_animation(
         if current + 1 == total:
             to_jshtml_pbar.close()
 
+    step = max(1, len(states) // max_frames)
+    interval_ms = interval_ms * step
+
     animation, length = create_animation(
-        reference,
-        states,
-        controls,
+        ref_traj,
+        states[::step],
+        controls[::step],
         max_steer,
         max_accel,
         interval_ms,
@@ -140,7 +144,7 @@ def show_animation(
 
 
 def create_animation(
-    reference: DataFrame,
+    ref_traj: DataFrame,
     states: DataFrame,
     controls: DataFrame,
     max_steer: float,
@@ -184,7 +188,7 @@ def create_animation(
         state = dict(state)
         control = dict(control)
         frame = create_frame(
-            reference=reference,
+            ref_traj=ref_traj,
             state=state,  # type: ignore
             control=control,  # type: ignore
             vehicle_width=vehicle_width,
@@ -204,7 +208,7 @@ def create_animation(
 
 
 def create_frame(
-    reference: DataFrame,
+    ref_traj: DataFrame,
     state: State,
     control: Control,
     vehicle_width: float,
@@ -268,8 +272,8 @@ def create_frame(
     xs_xform, ys_xform = affine_transform(xs_xform, ys_xform, angle=yaw)
     frame += ax_main.fill(xs_xform, ys_xform, color="black", zorder=3)
 
-    ref_x = reference["x"] - np.full(reference.shape[0], x)
-    ref_y = reference["y"] - np.full(reference.shape[0], y)
+    ref_x = ref_traj["x"] - np.full(ref_traj.shape[0], x)
+    ref_y = ref_traj["y"] - np.full(ref_traj.shape[0], y)
     frame += ax_main.plot(ref_x, ref_y, color="black", linestyle="dashed", linewidth=1.5)
 
     #
@@ -292,7 +296,7 @@ def create_frame(
     # Minimap
     #
 
-    frame += ax_mini.plot(reference["x"], reference["y"], color="black", linestyle="dashed")
+    frame += ax_mini.plot(ref_traj["x"], ref_traj["y"], color="black", linestyle="dashed")
 
     xs = np.array([-0.5, -0.5, 0.5, 0.5, -0.5]) * vehicle_length
     ys = np.array([-0.5, 0.5, 0.5, -0.5, -0.5]) * vehicle_width
@@ -304,27 +308,29 @@ def create_frame(
     # Steering display
     #
 
-    s_abs = np.abs(steer)
-    left_adjust = 0.0 if steer < 0.0 else -s_abs
-    right_adjust = -s_abs if steer < 0.0 else 0.0
+    steer_color = "red" if abs(steer) > 0.9 * max_steer else "black"
 
-    wedge_extent = 3.0 / 4.0
-    wedge_start = 225
+    steer = np.clip(steer, -max_steer, max_steer)
+    wedge_extent = 270
+    steer_percent = steer / max_steer
 
-    wedges = [
-        (max_steer + left_adjust) * wedge_extent,
-        s_abs * wedge_extent,
-        (max_steer + right_adjust) * wedge_extent,
-        2 * max_steer * (1 - wedge_extent),
-    ]
+    half_wedge = wedge_extent / 2
+    steer_angle = steer_percent * half_wedge
 
-    # TODO: change the color when at limit
+    left_wedge = half_wedge - max(0, steer_angle)
+    steer_wedge = abs(steer_angle)
+    right_wedge = half_wedge + min(0, steer_angle)
+    rest = 360 - wedge_extent
+
+    wedges = [left_wedge, steer_wedge, right_wedge, rest]
+    colors = ["lightgray", steer_color, "lightgray", "white"]
+
     steer_pie_obj, _ = ax_steer.pie(  # type: ignore
         wedges,
-        startangle=wedge_start,
+        startangle=225,
         counterclock=False,
-        colors=["lightgray", "black", "lightgray", "white"],
-        wedgeprops={"linewidth": 0, "edgecolor": "white", "width": 0.4},
+        colors=colors,
+        wedgeprops={"width": 0.4, "edgecolor": "white"},
     )
     frame += steer_pie_obj
 
@@ -343,23 +349,29 @@ def create_frame(
     # Acceleration display
     #
 
-    s_abs = np.abs(accel)
-    left_adjust = 0.0 if accel < 0.0 else -s_abs
-    right_adjust = -s_abs if accel < 0.0 else 0.0
+    accel_color = "red" if abs(accel) > 0.9 * max_accel else "black"
 
-    wedges = [
-        (max_steer + left_adjust) * wedge_extent,
-        s_abs * wedge_extent,
-        (max_steer + right_adjust) * wedge_extent,
-        2 * max_steer * (1 - wedge_extent),
-    ]
+    accel = np.clip(accel, -max_accel, max_accel)
+    wedge_extent = 270
+    accel_percent = accel / max_accel
+
+    half_wedge = wedge_extent / 2
+    accel_angle = accel_percent * half_wedge
+
+    left_wedge = half_wedge - max(0, accel_angle)
+    accel_wedge = abs(accel_angle)
+    right_wedge = half_wedge + min(0, accel_angle)
+    rest = 360 - wedge_extent
+
+    wedges = [left_wedge, accel_wedge, right_wedge, rest]
+    colors = ["lightgray", accel_color, "lightgray", "white"]
 
     accel_pie_obj, _ = ax_accel.pie(  # type: ignore
         wedges,
-        startangle=wedge_start,
+        startangle=225,
         counterclock=False,
-        colors=["lightgray", "black", "lightgray", "white"],
-        wedgeprops={"linewidth": 0, "edgecolor": "white", "width": 0.4},
+        colors=colors,
+        wedgeprops={"width": 0.4, "edgecolor": "white"},
     )
     frame += accel_pie_obj
 
@@ -430,3 +442,59 @@ def affine_transform(
     x_xform = [xval * cos_angle - yval * sin_angle + x for xval, yval in zip(xs, ys)]
     y_xform = [xval * sin_angle + yval * cos_angle + y for xval, yval in zip(xs, ys)]
     return x_xform, y_xform
+
+
+def plot_trajectory(
+    ref_traj=None, states=None, ax=None, arrow_length: float = 2.0, skip: int = 20
+):
+    if ref_traj is None and states is None:
+        raise ValueError("Either ref_traj or states must be provided.")
+
+    if ax is None:
+        _, ax = plt.subplots()
+
+    if ref_traj is not None:
+        ax.plot(ref_traj["x"], ref_traj["y"], "k--", label="Reference Trajectory")
+
+        xs = ref_traj["x"][::skip]
+        ys = ref_traj["y"][::skip]
+        yaws = ref_traj["yaw"][::skip]
+
+        for x, y, yaw in zip(xs, ys, yaws):
+            dx = arrow_length * np.cos(yaw)
+            dy = arrow_length * np.sin(yaw)
+            ax.arrow(
+                x,
+                y,
+                dx,
+                dy,
+                head_width=1.4,
+                head_length=1.0,
+                fc="black",
+                ec="black",
+                alpha=0.7,
+            )
+
+    if states is not None:
+        ax.plot(states["x"], states["y"], "b", label="Vehicle Path")
+
+        xs = states["x"][::skip]
+        ys = states["y"][::skip]
+        yaws = states["yaw"][::skip]
+
+        for x, y, yaw in zip(xs, ys, yaws):
+            dx = arrow_length * np.cos(yaw)
+            dy = arrow_length * np.sin(yaw)
+            ax.arrow(
+                x,
+                y,
+                dx,
+                dy,
+                head_width=1.4,
+                head_length=1.0,
+                fc="deeppink",
+                ec="deeppink",
+                alpha=0.7,
+            )
+
+    ax.axis("equal")
