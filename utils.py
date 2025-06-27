@@ -49,7 +49,7 @@ def stadium_trajectory(
     angles = np.linspace(-np.pi / 2, 3 * np.pi / 2, curve_count)
     x_cu = radius * np.cos(angles)
     y_cu = radius * np.sin(angles)
-    yaw_cu = angles + np.pi
+    yaw_cu = angles + np.pi / 2.0
 
     half_cu = straight_count // 2
     x_st = np.linspace(0, length, half_cu)
